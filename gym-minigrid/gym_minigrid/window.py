@@ -20,15 +20,30 @@ class Window:
         self.imshow_obj = None
 
         # Create the figure and axes
-        self.fig, self.ax = plt.subplots()
+        self.fig = plt.figure(figsize=(12,8))
+        grid = plt.GridSpec(3, 2, wspace=0.4, hspace=0.5, width_ratios=[1, 2])
+        
+        self.env_ax = self.fig.add_subplot(grid[:, 0])
+
+        self.relevance_ax = self.fig.add_subplot(grid[0, 1])
+        self.novelty_ax = self.fig.add_subplot(grid[1, 1])
+        self.accountability_ax = self.fig.add_subplot(grid[2, 1])
+
+        self.relevance_ax.set_xlabel('Appraisal 1 (Motivational Relevance): L1 Dist.')
+        self.novelty_ax.set_xlabel('Appraisal 2 (Novelty/Unexpectedness): KL Div.')
+        self.accountability_ax.set_xlabel('Appraisal 3 (Accountability)')
 
         # Show the env name in the window title
         self.fig.canvas.set_window_title(title)
 
         # Turn off x/y axis numbering/ticks
-        self.ax.set_xticks([], [])
-        self.ax.set_yticks([], [])
+        self.env_ax.xaxis.set_ticks_position('none')
+        self.env_ax.yaxis.set_ticks_position('none')
+        _ = self.env_ax.set_yticklabels([])
+        for ax in self.fig.get_axes():
+            _ = ax.set_xticklabels([])
 
+        plt.tight_layout()
         # Flag indicating the window was closed
         self.closed = False
 
@@ -37,6 +52,17 @@ class Window:
 
         self.fig.canvas.mpl_connect('close_event', close_handler)
 
+    def clear(self):
+        self.relevance_ax.lines = []
+        self.novelty_ax.lines = []
+        self.accountability_ax.lines = []
+
+    def plot(self, data, xmin, xmax):
+        self.clear()
+        self.relevance_ax.plot(data[0], 'red')
+        self.novelty_ax.plot(data[1], 'orange')
+        self.accountability_ax.plot(data[2], 'purple')
+
     def show_img(self, img):
         """
         Show an image or update the image being shown
@@ -44,7 +70,7 @@ class Window:
 
         # Show the first image of the environment
         if self.imshow_obj is None:
-            self.imshow_obj = self.ax.imshow(img, interpolation='bilinear')
+            self.imshow_obj = self.env_ax.imshow(img, interpolation='bilinear')
 
         self.imshow_obj.set_data(img)
         self.fig.canvas.draw()
@@ -58,7 +84,7 @@ class Window:
         Set/update the caption text below the image
         """
 
-        plt.xlabel(text)
+        self.env_ax.set_xlabel(f'Objective: {text}')
 
     def reg_key_handler(self, key_handler):
         """
