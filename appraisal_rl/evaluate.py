@@ -1,7 +1,7 @@
 import argparse
 import time
 import torch
-from torch_ac.utils.penv import ParallelEnv
+from utils.penv import ParallelEnv
 
 import gym_minigrid
 import utils

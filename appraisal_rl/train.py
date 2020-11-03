@@ -2,13 +2,13 @@ import argparse
 import time
 import datetime
 import torch
-import torch_ac
 import tensorboardX
 import sys
 
 import utils
 import gym_minigrid
 from models import ACModel, AppraisalModel
+from algos import PPOAlgo, A2CAlgo
 
 
 # Parse arguments
@@ -136,11 +136,11 @@ appraisal_model.to(device)
 # Load algo
 
 if args.algo == "a2c":
-    algo = torch_ac.A2CAlgo(envs, acmodel, appraisal_model, device, args.frames_per_proc, args.discount, args.lr, args.gae_lambda,
+    algo = A2CAlgo(envs, acmodel, appraisal_model, device, args.frames_per_proc, args.discount, args.lr, args.gae_lambda,
                             args.entropy_coef, args.value_loss_coef, args.max_grad_norm, args.recurrence,
                             args.optim_alpha, args.optim_eps, preprocess_obss)
 elif args.algo == "ppo":
-    algo = torch_ac.PPOAlgo(envs, acmodel, appraisal_model, device, args.frames_per_proc, args.discount, args.lr, args.gae_lambda,
+    algo = PPOAlgo(envs, acmodel, appraisal_model, device, args.frames_per_proc, args.discount, args.lr, args.gae_lambda,
                             args.entropy_coef, args.value_loss_coef, args.max_grad_norm, args.recurrence,
                             args.optim_eps, args.clip_eps, args.epochs, args.batch_size, preprocess_obss)
 else:

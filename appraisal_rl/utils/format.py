@@ -3,8 +3,14 @@ import json
 import numpy
 import re
 import torch
-import torch_ac
 import gym
+
+from utils.dictlist import DictList
+
+
+def default_preprocess_obss(obss, device=None):
+    return torch.tensor(obss, device=device)
+
 
 def get_obss_preprocessor(obs_space):
     # Check if obs_space is an image space
@@ -12,7 +18,7 @@ def get_obss_preprocessor(obs_space):
         obs_space = {"image": obs_space.shape}
 
         def preprocess_obss(obss, device=None):
-            return torch_ac.DictList({
+            return DictList({
                 "image": preprocess_images(obss, device=device)
             })
 
@@ -22,7 +28,7 @@ def get_obss_preprocessor(obs_space):
 
         vocab = Vocabulary(obs_space["text"])
         def preprocess_obss(obss, device=None):
-            return torch_ac.DictList({
+            return DictList({
                 "image": preprocess_images([obs["image"] for obs in obss], device=device),
                 "text": preprocess_texts([obs["mission"] for obs in obss], vocab, device=device)
             })
