@@ -1,6 +1,6 @@
 import argparse
 import time
-import numpy
+import numpy as np
 import torch
 
 import gym_minigrid
@@ -55,7 +55,7 @@ print("Environment loaded\n")
 
 model_dir = utils.get_model_dir(args.model)
 agent = utils.Agent(env.observation_space, env.action_space, model_dir,
-                    device=device, argmax=args.argmax, use_memory=args.memory, use_text=args.text, use_appraisal=args.appraisal)
+                    device=device, argmax=args.argmax, use_text=args.text)
 print("Agent loaded\n")
 
 # Run the agent
@@ -70,13 +70,16 @@ env.render('human')
 for episode in range(args.episodes):
     obs = env.reset()
 
-    appraisals = [[], [], []]
-    while True:
-        env.render('human', appraisals=appraisals)
-        if args.gif:
-            frames.append(numpy.moveaxis(env.render("rgb_array"), 2, 0))
+    # Set the initial values of the input variables at t=0
+    appraisal = [[], [], []]
+    dist = None
 
-        action, appraisals = agent.get_action(obs)
+    while True:
+        env.render('human', appraisal=appraisal)
+        if args.gif:
+            frames.append(np.moveaxis(env.render("rgb_array"), 2, 0))
+
+        dist, action, appraisal = agent.get_action(obs, dist, appraisal)
         obs, reward, done, _ = env.step(action)
         agent.analyze_feedback(reward, done)
 
@@ -88,5 +91,5 @@ for episode in range(args.episodes):
 
 if args.gif:
     print("Saving gif... ", end="")
-    write_gif(numpy.array(frames), args.gif+".gif", fps=1/args.pause)
+    write_gif(np.array(frames), args.gif+".gif", fps=1/args.pause)
     print("Done.")

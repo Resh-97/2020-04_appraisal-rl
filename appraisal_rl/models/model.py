@@ -4,6 +4,8 @@ import torch.nn.functional as F
 from torch.distributions.categorical import Categorical
 
 from .base import RecurrentACModel
+from algos.appraisal import motivational_relevance, novelty, accountability
+
 
 # Function from https://github.com/ikostrikov/pytorch-a2c-ppo-acktr/blob/master/model.py
 def init_params(m):
@@ -16,13 +18,11 @@ def init_params(m):
 
 
 class ACModel(nn.Module, RecurrentACModel):
-    def __init__(self, obs_space, action_space, use_memory=False, use_text=False, use_appraisal=False):
+    def __init__(self, obs_space, action_space, use_text=False):
         super().__init__()
 
         # Decide which components are enabled
         self.use_text = use_text
-        self.use_memory = use_memory
-        self.use_appraisal = use_appraisal
 
         # Define image embedding
         self.image_conv = nn.Sequential(
@@ -37,10 +37,10 @@ class ACModel(nn.Module, RecurrentACModel):
         n = obs_space["image"][0]
         m = obs_space["image"][1]
         self.image_embedding_size = ((n-1)//2-2)*((m-1)//2-2)*64
+        print(f'Image embedding size: {self.image_embedding_size}')
+        print(f'Semi memory size: {self.semi_memory_size}')
 
-        # Define memory
-        if self.use_memory:
-            self.memory_rnn = nn.LSTMCell(self.image_embedding_size, self.semi_memory_size)
+        self.memory_rnn = nn.LSTMCell(self.image_embedding_size, self.semi_memory_size)
 
         # Define text embedding
         if self.use_text:
@@ -53,9 +53,6 @@ class ACModel(nn.Module, RecurrentACModel):
         self.embedding_size = self.semi_memory_size
         if self.use_text:
             self.embedding_size += self.text_embedding_size
-
-        if self.use_appraisal:
-            self.embedding_size += 3
 
         # Define actor's model
         self.actor = nn.Sequential(
@@ -80,23 +77,37 @@ class ACModel(nn.Module, RecurrentACModel):
 
     @property
     def semi_memory_size(self):
-        return self.image_embedding_size
+        return self.image_embedding_size# + 3
 
-    def forward(self, obs, memory, appraisal):
+    def forward(self, obs, memory, dist, appraisal):
+        # Reshape the environment frame and pass it through
+        # the convolutional layers to produce a state feature
         x = obs.image.transpose(1, 3).transpose(2, 3)
         x = self.image_conv(x)
         x = x.reshape(x.shape[0], -1)
 
-        if self.use_appraisal:
-            x = torch.cat((x, appraisal), dim=1)
-
-        if self.use_memory:
-            hidden = (memory[:, :self.semi_memory_size], memory[:, self.semi_memory_size:])
-            hidden = self.memory_rnn(x, hidden)
-            embedding = hidden[0]
-            memory = torch.cat(hidden, dim=1)
+        # If dist is None, then this is the first step of the episode (t=0).
+        if dist is None:
+            novelty_values = torch.zeros((x.shape[0], 1))
         else:
-            embedding = x
+            novelty_values = novelty(dist.logits).unsqueeze(1)
+
+        appraisal = torch.hstack((
+            motivational_relevance(obs.image[..., 0]).unsqueeze(1),
+            novelty_values,
+            torch.zeros((x.shape[0], 1))
+        ))
+
+        # Update the memory with the hidden state, the cell state,
+        # and the appraisal. The appraisal is concatenated into the
+        # cell state, since appraisal contains episodic information.
+        h = memory[:, :self.semi_memory_size]
+        #c = torch.hstack((memory[:, (self.semi_memory_size + 3):], appraisal))
+        c = memory[:, self.semi_memory_size:]
+
+        hidden = self.memory_rnn(x, (h, c))
+        embedding = hidden[0]
+        memory = torch.cat(hidden, dim=1)
 
         if self.use_text:
             embed_text = self._get_embed_text(obs.text)
@@ -108,7 +119,7 @@ class ACModel(nn.Module, RecurrentACModel):
         x = self.critic(embedding)
         value = x.squeeze(1)
 
-        return dist, value, memory, embedding
+        return dist, value, memory, embedding, appraisal
 
     def _get_embed_text(self, text):
         _, hidden = self.text_rnn(self.word_embedding(text))

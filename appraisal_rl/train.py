@@ -7,7 +7,7 @@ import sys
 
 import utils
 import gym_minigrid
-from models import ACModel, AppraisalModel
+from models import ACModel
 from algos import PPOAlgo, A2CAlgo
 
 
@@ -62,8 +62,6 @@ parser.add_argument("--recurrence", type=int, default=1,
                     help="number of time-steps gradient is backpropagated (default: 1). If > 1, a LSTM is added to the model to have memory.")
 parser.add_argument("--text", action="store_true", default=False,
                     help="add a GRU to the model to handle text input")
-parser.add_argument("--appraisal", action="store_true", default=False,
-                    help="internal appraisal model is used in the action decision")
 
 args = parser.parse_args()
 
@@ -121,26 +119,21 @@ txt_logger.info("Observations preprocessor loaded")
 
 # Load model
 
-acmodel = ACModel(obs_space, envs[0].action_space, args.mem, args.text, args.appraisal)
+acmodel = ACModel(obs_space, envs[0].action_space, args.text)
 if "model_state" in status:
     acmodel.load_state_dict(status["model_state"])
 acmodel.to(device)
 txt_logger.info("Model loaded\n")
 txt_logger.info("{}\n".format(acmodel))
 
-# Load appraisal model
-
-appraisal_model = AppraisalModel(acmodel.embedding_size, acmodel.embedding_size // 2)
-appraisal_model.to(device)
-
 # Load algo
 
 if args.algo == "a2c":
-    algo = A2CAlgo(envs, acmodel, appraisal_model, device, args.frames_per_proc, args.discount, args.lr, args.gae_lambda,
+    algo = A2CAlgo(envs, acmodel, device, args.frames_per_proc, args.discount, args.lr, args.gae_lambda,
                             args.entropy_coef, args.value_loss_coef, args.max_grad_norm, args.recurrence,
                             args.optim_alpha, args.optim_eps, preprocess_obss)
 elif args.algo == "ppo":
-    algo = PPOAlgo(envs, acmodel, appraisal_model, device, args.frames_per_proc, args.discount, args.lr, args.gae_lambda,
+    algo = PPOAlgo(envs, acmodel, device, args.frames_per_proc, args.discount, args.lr, args.gae_lambda,
                             args.entropy_coef, args.value_loss_coef, args.max_grad_norm, args.recurrence,
                             args.optim_eps, args.clip_eps, args.epochs, args.batch_size, preprocess_obss)
 else:
@@ -184,10 +177,10 @@ while num_frames < args.frames:
         header += ["num_frames_" + key for key in num_frames_per_episode.keys()]
         data += num_frames_per_episode.values()
         header += ["entropy", "value", "policy_loss", "value_loss", "grad_norm"]
-        data += [logs["entropy"], logs["value"], logs["policy_loss"], logs["value_loss"], logs["grad_norm"], logs["appraisal_loss"]]
+        data += [logs["entropy"], logs["value"], logs["policy_loss"], logs["value_loss"], logs["grad_norm"]]
 
         txt_logger.info(
-            "U {} | F {:06} | FPS {:04.0f} | D {} | rR:μσmM {:.2f} {:.2f} {:.2f} {:.2f} | F:μσmM {:.1f} {:.1f} {} {} | H {:.3f} | V {:.3f} | pL {:.3f} | vL {:.3f} | ∇ {:.3f} | A {:.3f}"
+            "U {} | F {:06} | FPS {:04.0f} | D {} | rR:μσmM {:.2f} {:.2f} {:.2f} {:.2f} | F:μσmM {:.1f} {:.1f} {} {} | H {:.3f} | V {:.3f} | pL {:.3f} | vL {:.3f} | ∇ {:.3f}"
             .format(*data))
 
         header += ["return_" + key for key in return_per_episode.keys()]
@@ -205,7 +198,7 @@ while num_frames < args.frames:
 
     if args.save_interval > 0 and update % args.save_interval == 0:
         status = {"num_frames": num_frames, "update": update,
-                  "model_state": acmodel.state_dict(), "appraisal_state": appraisal_model.state_dict(),
+                  "model_state": acmodel.state_dict(),
                   "optimizer_state": algo.optimizer.state_dict()}
         if hasattr(preprocess_obss, "vocab"):
             status["vocab"] = preprocess_obss.vocab.vocab

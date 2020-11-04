@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 import torch
+from torch.distributions.categorical import Categorical
 
 from utils.format import default_preprocess_obss
 from utils.dictlist import DictList
@@ -8,7 +9,7 @@ from utils.penv import ParallelEnv
 class BaseAlgo(ABC):
     """The base class for RL algorithms."""
 
-    def __init__(self, envs, acmodel, appraisal_model, device, num_frames_per_proc, discount, lr, gae_lambda, entropy_coef,
+    def __init__(self, envs, acmodel, device, num_frames_per_proc, discount, lr, gae_lambda, entropy_coef,
                  value_loss_coef, max_grad_norm, recurrence, preprocess_obss, reshape_reward):
         """
         Initializes a `BaseAlgo` instance.
@@ -50,7 +51,6 @@ class BaseAlgo(ABC):
 
         self.env = ParallelEnv(envs)
         self.acmodel = acmodel
-        self.appraisal_model = appraisal_model
         self.device = device
         self.num_frames_per_proc = num_frames_per_proc
         self.discount = discount
@@ -73,11 +73,6 @@ class BaseAlgo(ABC):
         self.acmodel.to(self.device)
         self.acmodel.train()
 
-        # Configure appraisal_model
-
-        self.appraisal_model.to(self.device)
-        self.appraisal_model.train()
-
         # Store helpers values
 
         self.num_procs = len(envs)
@@ -99,6 +94,7 @@ class BaseAlgo(ABC):
         self.rewards = torch.zeros(*shape, device=self.device)
         self.advantages = torch.zeros(*shape, device=self.device)
         self.log_probs = torch.zeros(*shape, device=self.device)
+        self.appraisals = torch.zeros(*shape, 3, device=self.device)
 
         # Initialize log values
 
@@ -132,19 +128,23 @@ class BaseAlgo(ABC):
             reward, policy loss, value loss, etc.
         """
 
-        appraisal = torch.zeros((self.num_procs,3))
+        # Set the initial values of the input variables at t=0
+        appraisal = torch.zeros((self.num_procs, 3))
+        dist = None
 
         for i in range(self.num_frames_per_proc):
             # Do one agent-environment interaction
 
+            # Usually converts the observation into a torch.Tensor.
             preprocessed_obs = self.preprocess_obss(self.obs, device=self.device)
 
             with torch.no_grad():
-                if self.acmodel.recurrent:
-                    dist, value, memory, embedding = self.acmodel(preprocessed_obs, self.memory * self.mask.unsqueeze(1), appraisal)
-                    appraisal = self.appraisal_model(embedding)
-                else:
-                    dist, value = self.acmodel(preprocessed_obs)
+                dist, value, memory, embedding, appraisal = self.acmodel(
+                    obs=preprocessed_obs,
+                    memory=self.memory * self.mask.unsqueeze(1),
+                    dist=dist,
+                    appraisal=appraisal)
+
             action = dist.sample()
 
             obs, reward, done, _ = self.env.step(action.cpu().numpy())
@@ -168,6 +168,7 @@ class BaseAlgo(ABC):
             else:
                 self.rewards[i] = torch.tensor(reward, device=self.device)
             self.log_probs[i] = dist.log_prob(action)
+            self.appraisals[i] = appraisal
 
             # Update log values
 
@@ -190,7 +191,7 @@ class BaseAlgo(ABC):
         preprocessed_obs = self.preprocess_obss(self.obs, device=self.device)
         with torch.no_grad():
             if self.acmodel.recurrent:
-                _, next_value, _, _ = self.acmodel(preprocessed_obs, self.memory * self.mask.unsqueeze(1), appraisal)
+                _, next_value, _, _, _ = self.acmodel(preprocessed_obs, self.memory * self.mask.unsqueeze(1), dist, appraisal)
             else:
                 _, next_value = self.acmodel(preprocessed_obs)
 

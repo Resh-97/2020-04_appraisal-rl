@@ -4,56 +4,18 @@ import torch.nn.functional as F
 
 from .base import BaseAlgo
 
-def motivational_relevance(obs):
-    """Computes motivational relevance for a batch of observations.
-    Motivational relevance is a function of the L1 distance to the goal.
-    Some observation states do not contain the goal, so relevance is zero.
-    """
-    batch_size, w, _ = obs.size()
-    relevance = torch.zeros(batch_size)
-    agent_pos = torch.nonzero(obs == 10)[:, 1:]
-    goal_poss = torch.nonzero(obs == 8)
-    for goal in goal_poss:
-        idx, goal_pos = goal[0], goal[1:]
-        dist = torch.norm(agent_pos[idx] - goal_pos.float(), 1)
-        relevance[idx] = 1 - (dist - 1) / (2 * (w - 1))
-    return relevance
-
-def novelty(logits):
-    """Computes novelty according to the KL Divergence from perfect uncertainty.
-    The higher the KL Divergence, the less novel the scenario,
-    so we take novelty as the negative of the KL Divergence.
-    """
-    batch_size, num_actions = logits.size()
-    P = torch.softmax(logits, dim=1)
-    Q = torch.full(P.size(), 1 / num_actions)
-    return -torch.sum(Q * torch.log(Q / P), dim=1)
-
-def accountability(actions, reward):
-    """How responsible were you for the outcome that happened?
-    If a highly probable observation was observed after an action, it can
-    be assumed that the agent's action caused the state change, and vice-versa.
-    Accountability is in the range 0 (not caused by agent) to 1 (caused by agent).
-
-    Regret
-    The overall feeling of regret at some decision is a combination of these two components: 
-        (1) You regret both that the outcome is poorer than some standard (often the outcome of the option you rejected) and,
-        (2) that the decision you made was, in retrospect, unjustified.
-    """ 
-    return reward
-
 
 class PPOAlgo(BaseAlgo):
     """The Proximal Policy Optimization algorithm
     ([Schulman et al., 2015](https://arxiv.org/abs/1707.06347))."""
 
-    def __init__(self, envs, acmodel, appraisal_model, device=None, num_frames_per_proc=None, discount=0.99, lr=0.001, gae_lambda=0.95,
+    def __init__(self, envs, acmodel, device=None, num_frames_per_proc=None, discount=0.99, lr=0.001, gae_lambda=0.95,
                  entropy_coef=0.01, value_loss_coef=0.5, max_grad_norm=0.5, recurrence=4,
                  adam_eps=1e-8, clip_eps=0.2, epochs=4, batch_size=256, preprocess_obss=None,
                  reshape_reward=None):
         num_frames_per_proc = num_frames_per_proc or 128
 
-        super().__init__(envs, acmodel, appraisal_model, device, num_frames_per_proc, discount, lr, gae_lambda, entropy_coef,
+        super().__init__(envs, acmodel, device, num_frames_per_proc, discount, lr, gae_lambda, entropy_coef,
                          value_loss_coef, max_grad_norm, recurrence, preprocess_obss, reshape_reward)
 
         self.clip_eps = clip_eps
@@ -63,7 +25,6 @@ class PPOAlgo(BaseAlgo):
         assert self.batch_size % self.recurrence == 0
 
         self.optimizer = torch.optim.Adam(self.acmodel.parameters(), lr, eps=adam_eps)
-        self.appraisal_optimizer = torch.optim.Adam(self.appraisal_model.parameters(), lr, eps=adam_eps)
         self.batch_num = 0
 
     def update_parameters(self, exps):
@@ -94,21 +55,17 @@ class PPOAlgo(BaseAlgo):
                 if self.acmodel.recurrent:
                     memory = exps.memory[inds]
                 
-                appraisals = None
+                appraisal = torch.zeros((len(inds), 3))
+                dist = None
 
                 for i in range(self.recurrence):
                     # Create a sub-batch of experience
 
                     sb = exps[inds + i]
-                    if appraisals is None:
-                        appraisals = torch.zeros((len(inds), 3))
 
                     # Compute loss
 
-                    if self.acmodel.recurrent:
-                        dist, value, memory, embedding = self.acmodel(sb.obs, memory * sb.mask, appraisals)
-                    else:
-                        dist, value = self.acmodel(sb.obs)
+                    dist, value, memory, embedding, appraisal = self.acmodel(sb.obs, memory * sb.mask, dist, appraisal)
 
                     entropy = dist.entropy().mean()
 
@@ -123,14 +80,6 @@ class PPOAlgo(BaseAlgo):
                     value_loss = torch.max(surr1, surr2).mean()
 
                     loss = policy_loss - self.entropy_coef * entropy + self.value_loss_coef * value_loss
-                    
-                    appraisals = self.appraisal_model(embedding)
-                    appraisal_target = torch.vstack((
-                        motivational_relevance(sb.obs.image[..., 0]),
-                        novelty(dist.logits),
-                        accountability(sb.action, sb.reward)
-                    )).T
-                    appraisal_loss = F.mse_loss(appraisals, appraisal_target)
 
                     # Update batch values
 
@@ -139,7 +88,6 @@ class PPOAlgo(BaseAlgo):
                     batch_policy_loss += policy_loss.item()
                     batch_value_loss += value_loss.item()
                     batch_loss += loss
-                    batch_appraisal_loss += appraisal_loss.item()
 
                     # Update memories for next epoch
 
@@ -155,19 +103,18 @@ class PPOAlgo(BaseAlgo):
                 batch_loss /= self.recurrence
                 batch_appraisal_loss /= self.recurrence
 
-                # Update appraisal
-
-                self.appraisal_optimizer.zero_grad()
-                appraisal_loss.backward(retain_graph=True)
-                grad_norm = sum(p.grad.data.norm(2).item() ** 2 for p in self.appraisal_model.parameters()) ** 0.5
-                torch.nn.utils.clip_grad_norm_(self.appraisal_model.parameters(), self.max_grad_norm)
-                self.appraisal_optimizer.step()
-
-                # Update actor-critic,
+                # Update actor-critic
 
                 self.optimizer.zero_grad()
                 batch_loss.backward()
                 grad_norm = sum(p.grad.data.norm(2).item() ** 2 for p in self.acmodel.parameters()) ** 0.5
+
+                # NOTE: For training debugging purposes.
+                # Print grad norm of specific parameters in {actor, critic, image_conv, memory_rnn}
+                # for i, (name, param) in enumerate(self.acmodel.named_parameters()):
+                #     if name.split('.')[0] == 'actor':
+                #         print(name, param.grad.data.norm(2).item() ** 2)
+                    
                 torch.nn.utils.clip_grad_norm_(self.acmodel.parameters(), self.max_grad_norm)
                 self.optimizer.step()
 
@@ -178,7 +125,6 @@ class PPOAlgo(BaseAlgo):
                 log_policy_losses.append(batch_policy_loss)
                 log_value_losses.append(batch_value_loss)
                 log_grad_norms.append(grad_norm)
-                log_appraisal_losses.append(batch_appraisal_loss)
 
         # Log some values
 
@@ -187,8 +133,7 @@ class PPOAlgo(BaseAlgo):
             "value": numpy.mean(log_values),
             "policy_loss": numpy.mean(log_policy_losses),
             "value_loss": numpy.mean(log_value_losses),
-            "grad_norm": numpy.mean(log_grad_norms),
-            "appraisal_loss": numpy.mean(log_appraisal_losses)
+            "grad_norm": numpy.mean(log_grad_norms)
         }
 
         return logs

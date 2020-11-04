@@ -1235,7 +1235,7 @@ class MiniGridEnv(gym.Env):
 
         return img
 
-    def render(self, mode='human', appraisals=None, close=False, highlight=True, tile_size=TILE_PIXELS):
+    def render(self, mode='human', appraisal=None, close=False, highlight=True, tile_size=TILE_PIXELS):
         """
         Render the whole-grid human view
         """
@@ -1292,8 +1292,8 @@ class MiniGridEnv(gym.Env):
             self.window.show_img(img)
             self.window.set_caption(self.mission + f'\n{self.unwrapped.spec.id.strip("MiniGrid-")}')
 
-        if appraisals is not None:
-            self.window.plot(appraisals, 0, len(appraisals[0]))
+        if appraisal is not None:
+            self.window.plot(appraisal, 0, len(appraisal[0]))
 
         return img
 
