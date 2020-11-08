@@ -151,7 +151,6 @@ start_time = time.time()
 
 while num_frames < args.frames:
     # Update model parameters
-
     update_start_time = time.time()
     exps, logs1 = algo.collect_experiences()
     logs2 = algo.update_parameters(exps)

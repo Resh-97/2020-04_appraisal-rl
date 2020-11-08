@@ -31,11 +31,11 @@ class Agent:
         if hasattr(self.preprocess_obss, "vocab"):
             self.preprocess_obss.vocab.load_vocab(get_vocab(model_dir))
 
-    def get_actions(self, obss, dist, appraisal):
+    def get_actions(self, obss, dist, appraisal, accountable):
         preprocessed_obss = self.preprocess_obss(obss, device=self.device)
 
         with torch.no_grad():
-            dist, _, self.memories, embedding, appraisal = self.acmodel(preprocessed_obss, self.memories, dist, appraisal)
+            dist, _, self.memories, embedding, appraisal = self.acmodel(preprocessed_obss, self.memories, dist, appraisal, accountable)
 
         if self.argmax:
             actions = dist.probs.max(1, keepdim=True)[1]
@@ -51,8 +51,8 @@ class Agent:
         
         return dist, actions.cpu().numpy()
 
-    def get_action(self, obs, dist, appraisal):
-        dist, action = self.get_actions([obs], dist, appraisal)
+    def get_action(self, obs, dist, appraisal, accountable):
+        dist, action = self.get_actions([obs], dist, appraisal, accountable)
         return dist, action[0], self.appraisal
 
     def analyze_feedbacks(self, rewards, dones):

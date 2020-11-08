@@ -130,7 +130,9 @@ class BaseAlgo(ABC):
 
         # Set the initial values of the input variables at t=0
         appraisal = torch.zeros((self.num_procs, 3))
+        appraisal[:, 2] = 1. # Accountability is initially 1.
         dist = None
+        accountable = torch.ones((self.num_procs, 1))
 
         for i in range(self.num_frames_per_proc):
             # Do one agent-environment interaction
@@ -143,11 +145,13 @@ class BaseAlgo(ABC):
                     obs=preprocessed_obs,
                     memory=self.memory * self.mask.unsqueeze(1),
                     dist=dist,
-                    appraisal=appraisal)
+                    appraisal=appraisal,
+                    accountable=accountable)
 
             action = dist.sample()
 
-            obs, reward, done, _ = self.env.step(action.cpu().numpy())
+            obs, reward, done, _, accountable = self.env.step(action.cpu().numpy())
+            accountable = torch.Tensor(accountable).reshape(self.num_procs, -1)
 
             # Update experiences values
 
@@ -191,7 +195,7 @@ class BaseAlgo(ABC):
         preprocessed_obs = self.preprocess_obss(self.obs, device=self.device)
         with torch.no_grad():
             if self.acmodel.recurrent:
-                _, next_value, _, _, _ = self.acmodel(preprocessed_obs, self.memory * self.mask.unsqueeze(1), dist, appraisal)
+                _, next_value, _, _, _ = self.acmodel(preprocessed_obs, self.memory * self.mask.unsqueeze(1), dist, appraisal, accountable)
             else:
                 _, next_value = self.acmodel(preprocessed_obs)
 

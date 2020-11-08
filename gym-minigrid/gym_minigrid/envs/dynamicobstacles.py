@@ -1,6 +1,7 @@
 from gym_minigrid.minigrid import *
 from gym_minigrid.register import register
 from operator import add
+import random
 
 class DynamicObstaclesEnv(MiniGridEnv):
     """
@@ -62,20 +63,27 @@ class DynamicObstaclesEnv(MiniGridEnv):
         if action >= self.action_space.n:
             action = 0
 
-        # Check if there is an obstacle in front of the agent
-        front_cell = self.grid.get(*self.front_pos)
-        not_clear = front_cell and front_cell.type != 'goal'
+        accountable = 1
 
         # Update obstacle positions
         for i_obst in range(len(self.obstacles)):
             old_pos = self.obstacles[i_obst].cur_pos
+            #if random.getrandbits(2) != 0: # 75% chance
             top = tuple(map(add, old_pos, (-1, -1)))
+            #else:
+            #    top = old_pos
 
             try:
-                self.place_obj(self.obstacles[i_obst], top=top, size=(3,3), max_tries=100)
+                new_pos = self.place_obj(self.obstacles[i_obst], top=top, size=(3,3), max_tries=100)
                 self.grid.set(*old_pos, None)
+                if all(new_pos == self.front_pos):
+                    accountable = 0
             except:
                 pass
+
+        # Check if there is an obstacle in front of the agent
+        front_cell = self.grid.get(*self.front_pos)
+        not_clear = front_cell and front_cell.type != 'goal'
 
         # Update the agent's position/direction
         obs, reward, done, info = MiniGridEnv.step(self, action)
@@ -84,9 +92,9 @@ class DynamicObstaclesEnv(MiniGridEnv):
         if action == self.actions.forward and not_clear:
             reward = -1
             done = True
-            return obs, reward, done, info
+            return obs, reward, done, info, accountable
 
-        return obs, reward, done, info
+        return obs, reward, done, info, accountable
 
 class DynamicObstaclesEnv5x5(DynamicObstaclesEnv):
     def __init__(self):

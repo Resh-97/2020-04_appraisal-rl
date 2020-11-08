@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from torch.distributions.categorical import Categorical
 
 from .base import RecurrentACModel
-from algos.appraisal import motivational_relevance, novelty, accountability
+from algos.appraisal import motivational_relevance, novelty
 
 
 # Function from https://github.com/ikostrikov/pytorch-a2c-ppo-acktr/blob/master/model.py
@@ -79,7 +79,7 @@ class ACModel(nn.Module, RecurrentACModel):
     def semi_memory_size(self):
         return self.image_embedding_size# + 3
 
-    def forward(self, obs, memory, dist, appraisal):
+    def forward(self, obs, memory, dist, appraisal, accountable):
         # Reshape the environment frame and pass it through
         # the convolutional layers to produce a state feature
         x = obs.image.transpose(1, 3).transpose(2, 3)
@@ -91,19 +91,18 @@ class ACModel(nn.Module, RecurrentACModel):
             novelty_values = torch.zeros((x.shape[0], 1))
         else:
             novelty_values = novelty(dist.logits).unsqueeze(1)
-
         appraisal = torch.hstack((
             motivational_relevance(obs.image[..., 0]).unsqueeze(1),
             novelty_values,
-            torch.zeros((x.shape[0], 1))
+            accountable
         ))
 
         # Update the memory with the hidden state, the cell state,
         # and the appraisal. The appraisal is concatenated into the
         # cell state, since appraisal contains episodic information.
         h = memory[:, :self.semi_memory_size]
-        #c = torch.hstack((memory[:, (self.semi_memory_size + 3):], appraisal))
-        c = memory[:, self.semi_memory_size:]
+        c = torch.hstack((memory[:, (self.semi_memory_size + 3):], appraisal))
+        #c = memory[:, self.semi_memory_size:]
 
         hidden = self.memory_rnn(x, (h, c))
         embedding = hidden[0]

@@ -30,7 +30,7 @@ class PPOAlgo(BaseAlgo):
     def update_parameters(self, exps):
         # Collect experiences
 
-        for _ in range(self.epochs):
+        for epoch in range(self.epochs):
             # Initialize log values
 
             log_entropies = []
@@ -40,7 +40,7 @@ class PPOAlgo(BaseAlgo):
             log_grad_norms = []
             log_appraisal_losses = []
 
-            for inds in self._get_batches_starting_indexes():
+            for b, inds in enumerate(self._get_batches_starting_indexes()):
                 # Initialize batch values
 
                 batch_entropy = 0
@@ -57,6 +57,7 @@ class PPOAlgo(BaseAlgo):
                 
                 appraisal = torch.zeros((len(inds), 3))
                 dist = None
+                accountable = torch.ones((len(inds), 1))
 
                 for i in range(self.recurrence):
                     # Create a sub-batch of experience
@@ -65,7 +66,7 @@ class PPOAlgo(BaseAlgo):
 
                     # Compute loss
 
-                    dist, value, memory, embedding, appraisal = self.acmodel(sb.obs, memory * sb.mask, dist, appraisal)
+                    dist, value, memory, embedding, appraisal = self.acmodel(sb.obs, memory * sb.mask, dist, appraisal, accountable)
 
                     entropy = dist.entropy().mean()
 
@@ -74,10 +75,11 @@ class PPOAlgo(BaseAlgo):
                     surr2 = torch.clamp(ratio, 1.0 - self.clip_eps, 1.0 + self.clip_eps) * sb.advantage
                     policy_loss = -torch.min(surr1, surr2).mean()
 
-                    value_clipped = sb.value + torch.clamp(value - sb.value, -self.clip_eps, self.clip_eps)
-                    surr1 = (value - sb.returnn).pow(2)
-                    surr2 = (value_clipped - sb.returnn).pow(2)
-                    value_loss = torch.max(surr1, surr2).mean()
+                    # value_clipped = sb.value + torch.clamp(value - sb.value, -self.clip_eps, self.clip_eps)
+                    # surr1 = (value - sb.returnn).pow(2)
+                    # surr2 = (value_clipped - sb.returnn).pow(2)
+                    # value_loss = torch.max(surr1, surr2).mean()
+                    value_loss = torch.square(value - sb.returnn).mean()
 
                     loss = policy_loss - self.entropy_coef * entropy + self.value_loss_coef * value_loss
 
@@ -112,7 +114,7 @@ class PPOAlgo(BaseAlgo):
                 # NOTE: For training debugging purposes.
                 # Print grad norm of specific parameters in {actor, critic, image_conv, memory_rnn}
                 # for i, (name, param) in enumerate(self.acmodel.named_parameters()):
-                #     if name.split('.')[0] == 'actor':
+                #     if name.split('.')[0] == 'memory_rnn':
                 #         print(name, param.grad.data.norm(2).item() ** 2)
                     
                 torch.nn.utils.clip_grad_norm_(self.acmodel.parameters(), self.max_grad_norm)

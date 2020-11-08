@@ -73,14 +73,16 @@ for episode in range(args.episodes):
     # Set the initial values of the input variables at t=0
     appraisal = [[], [], []]
     dist = None
+    accountable = torch.ones(size=(1,1))
 
     while True:
         env.render('human', appraisal=appraisal)
         if args.gif:
             frames.append(np.moveaxis(env.render("rgb_array"), 2, 0))
 
-        dist, action, appraisal = agent.get_action(obs, dist, appraisal)
-        obs, reward, done, _ = env.step(action)
+        dist, action, appraisal = agent.get_action(obs, dist, appraisal, accountable)
+        obs, reward, done, _, accountable = env.step(action)
+        accountable = torch.Tensor([accountable]).reshape(1,1)
         agent.analyze_feedback(reward, done)
 
         if done or env.window.closed:
